@@ -8,3 +8,4 @@ figs*
 macro_out*
 *.log
 .DS_Store
+data/
