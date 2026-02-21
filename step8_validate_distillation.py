@@ -54,6 +54,16 @@ def main():
     )
     parser.add_argument("--output_dir", type=str, default="distill_out")
     parser.add_argument("--server_alias", type=str, default="lq")
+    parser.add_argument(
+        "--normalize_rewards",
+        action="store_true",
+        help="Min-max normalize golden rewards to [0,1] (must match step7 setting)",
+    )
+    parser.add_argument(
+        "--binarize_rewards",
+        action="store_true",
+        help="Convert golden rewards to binary 0/1 (must match step7 setting)",
+    )
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -83,6 +93,41 @@ def main():
     all_golden = np.array(all_golden)
     input_dim = all_embeddings.shape[-1]
     print(f"Loaded {len(all_embeddings)} samples, dim = {input_dim}")
+
+    # Optional: binarize golden rewards
+    if args.binarize_rewards:
+        cfg_path = os.path.join(args.output_dir, "distillation_config.json")
+        threshold = None
+        if os.path.exists(cfg_path):
+            with open(cfg_path) as f:
+                cfg = json.load(f)
+            if "binarize_params" in cfg:
+                threshold = cfg["binarize_params"]["threshold"]
+        if threshold is None:
+            threshold = float(np.median(all_golden))
+        n_pos = int((all_golden > threshold).sum())
+        all_golden = (all_golden > threshold).astype(np.float64)
+        print(
+            f"Binarized golden rewards at threshold {threshold:.4f}: "
+            f"{n_pos} positive ({100*n_pos/len(all_golden):.1f}%)"
+        )
+
+    # Optional: normalize golden rewards to [0,1]
+    if args.normalize_rewards:
+        # Try to load norm params from step7 config
+        cfg_path = os.path.join(args.output_dir, "distillation_config.json")
+        if os.path.exists(cfg_path):
+            with open(cfg_path) as f:
+                cfg = json.load(f)
+            if "norm_params" in cfg:
+                r_min = cfg["norm_params"]["reward_min"]
+                r_max = cfg["norm_params"]["reward_max"]
+            else:
+                r_min, r_max = float(all_golden.min()), float(all_golden.max())
+        else:
+            r_min, r_max = float(all_golden.min()), float(all_golden.max())
+        all_golden = (all_golden - r_min) / (r_max - r_min + 1e-8)
+        print(f"Normalized golden rewards to [0,1]  (range [{r_min:.4f}, {r_max:.4f}])")
 
     # Use last 20% as held-out validation
     n_val = max(1, int(len(all_embeddings) * 0.2))

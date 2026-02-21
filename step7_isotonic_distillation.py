@@ -1,6 +1,7 @@
 import os
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 import argparse
@@ -142,6 +143,110 @@ def train_student(
     return model
 
 
+def train_student_hybrid(
+    model,
+    X_train,
+    y_train,
+    X_val,
+    y_val,
+    epochs,
+    lr,
+    batch_size,
+    device,
+    ranking_lambda=1.0,
+    n_rank_pairs=1024,
+    label="Student (hybrid)",
+):
+    """Train student with MSE on golden scores + BT-style pairwise ranking loss.
+
+    The MSE term teaches absolute value approximation while the ranking term
+    ensures correct pairwise ordering.  Together they let the student achieve
+    both low MSE to golden *and* high pairwise accuracy.
+    """
+    model = model.to(device)
+    mse_criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+
+    X_tr = torch.tensor(X_train, dtype=torch.float32).to(device)
+    y_tr = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    X_vl = torch.tensor(X_val, dtype=torch.float32).to(device)
+    y_vl = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+
+    best_val = float("inf")
+    best_state = None
+    patience_counter = 0
+    patience = 5
+
+    for epoch in range(epochs):
+        model.train()
+        perm = torch.randperm(X_tr.size(0))
+        epoch_mse, epoch_rank, n_b = 0.0, 0.0, 0
+
+        for i in range(0, X_tr.size(0), batch_size):
+            idx = perm[i : i + batch_size]
+            preds = model(X_tr[idx])
+            targets = y_tr[idx]
+
+            # --- MSE loss (value approximation) ---
+            mse_loss = mse_criterion(preds, targets)
+
+            # --- BT-style pairwise ranking loss ---
+            rank_loss = torch.tensor(0.0, device=device)
+            bs = len(idx)
+            if bs > 1 and ranking_lambda > 0:
+                n_p = min(n_rank_pairs, bs * (bs - 1) // 2)
+                ii = torch.randint(0, bs, (n_p,), device=device)
+                jj = torch.randint(0, bs, (n_p,), device=device)
+                mask = ii != jj
+                ii, jj = ii[mask], jj[mask]
+                if len(ii) > 0:
+                    diff_pred = (preds[ii] - preds[jj]).squeeze()
+                    diff_gold = (targets[ii] - targets[jj]).squeeze()
+                    # Filter ties
+                    non_tie = diff_gold.abs() > 1e-8
+                    if non_tie.sum() > 0:
+                        # BT: P(i>j) = sigmoid(pred_i - pred_j)
+                        # Label = 1 if gold_i > gold_j else 0
+                        bt_labels = (diff_gold[non_tie] > 0).float()
+                        rank_loss = F.binary_cross_entropy_with_logits(
+                            diff_pred[non_tie], bt_labels
+                        )
+
+            loss = mse_loss + ranking_lambda * rank_loss
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            epoch_mse += mse_loss.item()
+            epoch_rank += rank_loss.item()
+            n_b += 1
+
+        model.eval()
+        with torch.no_grad():
+            val_mse = mse_criterion(model(X_vl), y_vl).item()
+
+        print(
+            f"  [{label}] Epoch {epoch+1}/{epochs}, "
+            f"MSE: {epoch_mse/max(n_b,1):.4f}, "
+            f"Rank: {epoch_rank/max(n_b,1):.4f}, "
+            f"Val MSE: {val_mse:.4f}"
+        )
+
+        if val_mse < best_val:
+            best_val = val_mse
+            best_state = {k: v.clone() for k, v in model.state_dict().items()}
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print(f"  [{label}] Early stopping at epoch {epoch+1}")
+                break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    return model
+
+
 # ======================================================================
 # Main
 # ======================================================================
@@ -180,6 +285,43 @@ def main():
         help="Number of CV folds for isotonic fitting (0=no CV, fit on all)",
     )
     parser.add_argument("--server_alias", type=str, default="lq")
+    parser.add_argument(
+        "--normalize_rewards",
+        action="store_true",
+        help="Min-max normalize golden rewards to [0,1] before isotonic/student fitting",
+    )
+    parser.add_argument(
+        "--student_loss",
+        type=str,
+        choices=["mse", "hybrid"],
+        default="hybrid",
+        help="Student loss: 'mse' = pure MSE on isotonic(teacher) targets (legacy), "
+        "'hybrid' = MSE on golden + BT ranking loss (recommended)",
+    )
+    parser.add_argument(
+        "--ranking_lambda",
+        type=float,
+        default=1.0,
+        help="Weight of BT ranking loss relative to MSE (only for --student_loss hybrid)",
+    )
+    parser.add_argument(
+        "--n_rank_pairs",
+        type=int,
+        default=1024,
+        help="Number of pairwise comparisons per batch for ranking loss",
+    )
+    parser.add_argument(
+        "--binarize_rewards",
+        action="store_true",
+        help="Convert golden rewards to binary 0/1 (above/below median). "
+        "Ideal for isotonic regression — learns P(good|score).",
+    )
+    parser.add_argument(
+        "--binarize_threshold",
+        type=float,
+        default=None,
+        help="Custom threshold for binarization (default: median of golden rewards)",
+    )
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -197,6 +339,31 @@ def main():
         return
     input_dim = Embeds.shape[-1]
     print(f"Loaded {len(Embeds)} samples, embedding dim = {input_dim}")
+
+    # Optional: binarize golden rewards → 0/1
+    binarize_params = None
+    if args.binarize_rewards:
+        threshold = (
+            args.binarize_threshold
+            if args.binarize_threshold is not None
+            else float(np.median(Y_golden))
+        )
+        n_pos = int((Y_golden > threshold).sum())
+        Y_golden = (Y_golden > threshold).astype(np.float64)
+        binarize_params = {"threshold": threshold}
+        print(
+            f"Binarized rewards at threshold {threshold:.4f}: "
+            f"{n_pos} positive ({100*n_pos/len(Y_golden):.1f}%), "
+            f"{len(Y_golden)-n_pos} negative"
+        )
+
+    # Optional: normalize golden rewards to [0, 1]
+    norm_params = None
+    if args.normalize_rewards:
+        r_min, r_max = float(Y_golden.min()), float(Y_golden.max())
+        Y_golden = (Y_golden - r_min) / (r_max - r_min + 1e-8)
+        norm_params = {"reward_min": r_min, "reward_max": r_max}
+        print(f"Normalized rewards to [0,1]  (original range [{r_min:.4f}, {r_max:.4f}])")
 
     # ------------------------------------------------------------------
     # 2. Split: calibration (60%) / student-train (20%) / held-out (20%)
@@ -274,24 +441,41 @@ def main():
     print(f"  Teacher+Isotonic Spearman on held-out: {sp_teacher_iso:.4f}")
 
     # ------------------------------------------------------------------
-    # 5. Train Student (distilled from isotonic-calibrated teacher)
-    #    Target = isotonic(teacher(x)), so student learns calibrated scores.
+    # 5. Train Student
     # ------------------------------------------------------------------
-    print(f"\nTraining Student (target = isotonic teacher scores)...")
-
-    # Student trains on student-train set, validates on held-out
-    student_model = train_student(
-        MLP(input_dim),
-        E_str,
-        T_str_iso,
-        E_val,
-        T_val_iso,
-        epochs=args.distill_epochs,
-        lr=args.learning_rate,
-        batch_size=1024,
-        device=device,
-        label="Student",
-    )
+    if args.student_loss == "hybrid":
+        print(
+            f"\nTraining Student (hybrid: MSE on golden + BT ranking, "
+            f"lambda={args.ranking_lambda})..."
+        )
+        student_model = train_student_hybrid(
+            MLP(input_dim),
+            E_str,
+            Y_str,  # golden scores as direct targets
+            E_val,
+            Y_val,  # validate against golden
+            epochs=args.distill_epochs,
+            lr=args.learning_rate,
+            batch_size=1024,
+            device=device,
+            ranking_lambda=args.ranking_lambda,
+            n_rank_pairs=args.n_rank_pairs,
+            label="Student (hybrid)",
+        )
+    else:
+        print(f"\nTraining Student (target = isotonic teacher scores)...")
+        student_model = train_student(
+            MLP(input_dim),
+            E_str,
+            T_str_iso,
+            E_val,
+            T_val_iso,
+            epochs=args.distill_epochs,
+            lr=args.learning_rate,
+            batch_size=1024,
+            device=device,
+            label="Student",
+        )
 
     save_path = os.path.join(
         args.output_dir, f"distilled_rm_{args.task}_{args.rm_objective}.ckpt"
@@ -373,8 +557,16 @@ def main():
         "input_dim": input_dim,
         "distill_epochs": args.distill_epochs,
         "cv_folds": args.cv_folds,
+        "normalize_rewards": args.normalize_rewards,
+        "student_loss": args.student_loss,
+        "ranking_lambda": args.ranking_lambda if args.student_loss == "hybrid" else None,
+        "binarize_rewards": args.binarize_rewards,
         "held_out_results": results_table,
     }
+    if binarize_params is not None:
+        config["binarize_params"] = binarize_params
+    if norm_params is not None:
+        config["norm_params"] = norm_params
     with open(os.path.join(args.output_dir, "distillation_config.json"), "w") as f:
         json.dump(config, f, indent=2)
 

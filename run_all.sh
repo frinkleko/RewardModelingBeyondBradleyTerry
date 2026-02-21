@@ -43,6 +43,10 @@ SEED="${SEED:-6}"
 ANNOTATION_QUALITY="${ANNOTATION_QUALITY:-10}"
 ENSEMBLE_NUMBER="${ENSEMBLE_NUMBER:-10}"
 DISTILL_EPOCHS="${DISTILL_EPOCHS:-20}"
+NORMALIZE_REWARDS="${NORMALIZE_REWARDS:-0}"
+STUDENT_LOSS="${STUDENT_LOSS:-hybrid}"
+RANKING_LAMBDA="${RANKING_LAMBDA:-1.0}"
+BINARIZE_REWARDS="${BINARIZE_REWARDS:-0}"
 
 # Derived
 REPLACEMENT="replacement_false"
@@ -230,6 +234,19 @@ uv run python3 step6_eval_rms.py \
     --output_dir "$OUTPUT_DIR"
 
 section "Step 7: Isotonic Distillation"
+STEP7_EXTRA_ARGS=(--student_loss "$STUDENT_LOSS")
+if [[ "$STUDENT_LOSS" == "hybrid" ]]; then
+    STEP7_EXTRA_ARGS+=(--ranking_lambda "$RANKING_LAMBDA")
+    echo "  (hybrid loss: MSE on golden + BT ranking, lambda=$RANKING_LAMBDA)"
+fi
+if [[ "$NORMALIZE_REWARDS" == "1" ]]; then
+    STEP7_EXTRA_ARGS+=(--normalize_rewards)
+    echo "  (reward normalization to [0,1] enabled)"
+fi
+if [[ "$BINARIZE_REWARDS" == "1" ]]; then
+    STEP7_EXTRA_ARGS+=(--binarize_rewards)
+    echo "  (binary rewards: golden > median -> 1, else -> 0)"
+fi
 uv run python3 step7_isotonic_distillation.py \
     --embed_model_name "$MODEL_NAME" \
     --task "$TASK" \
@@ -240,12 +257,20 @@ uv run python3 step7_isotonic_distillation.py \
     --distill_epochs "$DISTILL_EPOCHS" \
     --learning_rate "$LEARNING_RATE" \
     --data_dir "$DATA_DIR" \
-    --output_dir "$OUTPUT_DIR"
+    --output_dir "$OUTPUT_DIR" \
+    "${STEP7_EXTRA_ARGS[@]}"
 
 STUDENT_CKPT="${OUTPUT_DIR}/distilled_rm_${TASK}_${RM_OBJECTIVE}.ckpt"
 ISOTONIC_MODEL="${OUTPUT_DIR}/isotonic_map.joblib"
 
 section "Step 8: Validate Distillation"
+STEP8_EXTRA_ARGS=()
+if [[ "$NORMALIZE_REWARDS" == "1" ]]; then
+    STEP8_EXTRA_ARGS+=(--normalize_rewards)
+fi
+if [[ "$BINARIZE_REWARDS" == "1" ]]; then
+    STEP8_EXTRA_ARGS+=(--binarize_rewards)
+fi
 uv run python3 step8_validate_distillation.py \
     --embed_model_name "$MODEL_NAME" \
     --task "$TASK" \
@@ -255,7 +280,8 @@ uv run python3 step8_validate_distillation.py \
     --student_ckpt "$STUDENT_CKPT" \
     --isotonic_model "$ISOTONIC_MODEL" \
     --data_dir "$DATA_DIR" \
-    --output_dir "$OUTPUT_DIR"
+    --output_dir "$OUTPUT_DIR" \
+    "${STEP8_EXTRA_ARGS[@]}"
 
 # ---------------------------------------------------------------------------
 # Summary
