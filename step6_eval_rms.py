@@ -8,8 +8,10 @@ import numpy as np
 import argparse
 import json
 import glob
+import joblib
 from networks import MLP, forward_siamese, train_model, save_model
 from scipy.stats import spearmanr
+from sklearn.metrics import roc_auc_score, accuracy_score
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--embed_model_name", type=str, default="gemma2b")
@@ -43,6 +45,7 @@ parser.add_argument(
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--max_len", type=int, default=-1)
 parser.add_argument("--annotation_quality", type=float, default=10)
+parser.add_argument("--calibrator_path", type=str, default=None, help="Path to joblib calibrator")
 args = parser.parse_args()
 args.sft_obj_name = "none" if args.sft_obj == "" or args.sft_obj == "none" else "gpt4"
 args.sft_obj_suffix = "" if args.sft_obj == "none" else "-gpt4"
@@ -100,6 +103,8 @@ def load_local_eval_data(data_dir):
 
 print("=" * 60)
 print(f"Evaluating: task={args.task}, objective={args.rm_objective}")
+if args.calibrator_path:
+    print(f"Using calibrator: {args.calibrator_path}")
 print("=" * 60)
 
 # Load evaluation data
@@ -112,6 +117,11 @@ n_splits = stacked_emb.shape[0]
 n_prompts = stacked_emb.shape[1]
 emb_dim = stacked_emb.shape[2]
 print(f"Loaded {n_splits} splits, {n_prompts} prompts, embedding dim {emb_dim}")
+
+# Load calibrator if provided
+calibrator = None
+if args.calibrator_path and os.path.exists(args.calibrator_path):
+    calibrator = joblib.load(args.calibrator_path)
 
 # Load trained models
 model_predictions = []
@@ -168,6 +178,8 @@ print(f"\nMean ranking agreement: {np.nanmean(correlations):.4f}")
 if n_splits >= 2:
     correct = 0
     total = 0
+    all_pred_probs = []
+    all_true_labels = []
     for p_idx in range(n_prompts):
         for s1 in range(n_splits):
             for s2 in range(s1 + 1, n_splits):
@@ -176,11 +188,25 @@ if n_splits >= 2:
                     - model_predictions_mean[p_idx][s2]
                 )
                 true_diff = reward_list[p_idx][s1] - reward_list[p_idx][s2]
+                
+                # Base probability from BT model
+                prob = 1.0 / (1.0 + np.exp(-np.clip(pred_diff, -20, 20)))
+                
+                # Apply calibration if available
+                if calibrator:
+                    prob = calibrator.predict([prob])[0]
+                
+                all_pred_probs.append(prob)
+                all_true_labels.append(1 if true_diff > 0 else 0)
+
                 if (pred_diff > 0) == (true_diff > 0):
                     correct += 1
                 total += 1
+    
     pairwise_acc = correct / total if total > 0 else 0.0
+    auc_roc = roc_auc_score(all_true_labels, all_pred_probs) if total > 0 else 0.0
     print(f"Pairwise accuracy: {pairwise_acc:.4f} ({correct}/{total})")
+    print(f"Pairwise AUC-ROC: {auc_roc:.4f}")
 
 # Save results
 results = {
@@ -188,14 +214,17 @@ results = {
     "rm_objective": args.rm_objective,
     "n_prompts": n_prompts,
     "n_splits": n_splits,
+    "calibrated": calibrator is not None,
     "mean_ranking_agreement": float(np.nanmean(correlations)),
     "pairwise_accuracy": float(pairwise_acc) if n_splits >= 2 else None,
+    "pairwise_auc_roc": float(auc_roc) if n_splits >= 2 else None,
     "correlations": correlations.tolist(),
 }
 
+suffix = "_calibrated" if calibrator else ""
 result_fn = (
     f"{args.output_dir}/eval_results_{args.rm_objective}_seed{args.seed}_firstn_"
-    f"{args.consider_first_n}_n_{args.n_sample}.json"
+    f"{args.consider_first_n}_n_{args.n_sample}{suffix}.json"
 )
 with open(result_fn, "w") as f:
     json.dump(results, f, indent=2)
