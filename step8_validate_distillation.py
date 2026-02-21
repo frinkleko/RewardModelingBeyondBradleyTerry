@@ -232,15 +232,15 @@ def main():
     # ------------------------------------------------------------------
     n_show = min(5, len(val_emb))
     headers = ["GoldenTruth", "Teacher", "T+Isotonic", "Student"]
-    if si_preds is not None:
+    if si_val is not None:
         headers.append("S+Isotonic")
 
     print(f"\nScale Check (first {n_show} validation samples):")
     print("".join(f"{h:>14}" for h in headers))
     for i in range(n_show):
-        vals = [val_golden[i], t_preds[i], ti_preds[i], s_preds[i]]
-        if si_preds is not None:
-            vals.append(si_preds[i])
+        vals = [val_golden[i], t_val[i], ti_val[i], s_val[i]]
+        if si_val is not None:
+            vals.append(si_val[i])
         print("".join(f"{v:>14.4f}" for v in vals))
 
     # ------------------------------------------------------------------
