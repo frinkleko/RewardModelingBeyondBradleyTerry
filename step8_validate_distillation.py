@@ -16,9 +16,9 @@ def predict_batch(model, embeddings, device, batch_size=512):
     model.eval()
     preds = []
     for i in range(0, len(embeddings), batch_size):
-        batch = torch.tensor(
-            embeddings[i:i+batch_size], dtype=torch.float32
-        ).to(device)
+        batch = torch.tensor(embeddings[i : i + batch_size], dtype=torch.float32).to(
+            device
+        )
         with torch.no_grad():
             p = model(batch).cpu().numpy().flatten()
         preds.extend(p)
@@ -33,13 +33,25 @@ def main():
     parser.add_argument("--gen_pref_model_name", type=str, default="gemma2b")
     parser.add_argument("--teacher_ckpt", type=str, required=True)
     parser.add_argument("--student_ckpt", type=str, required=True)
-    parser.add_argument("--isotonic_model", type=str, required=True,
-                        help="Teacher isotonic map (isotonic_teacher_map.joblib or isotonic_map.joblib)")
-    parser.add_argument("--student_isotonic_model", type=str, default="",
-                        help="Student isotonic map (isotonic_student_map.joblib). "
-                             "If empty, tries output_dir/isotonic_student_map.joblib")
-    parser.add_argument("--data_dir", type=str, default="data",
-                        help="Directory containing EMBD-TRAIN-split_*.npy and rewards_split_*.json")
+    parser.add_argument(
+        "--isotonic_model",
+        type=str,
+        required=True,
+        help="Teacher isotonic map (isotonic_teacher_map.joblib or isotonic_map.joblib)",
+    )
+    parser.add_argument(
+        "--student_isotonic_model",
+        type=str,
+        default="",
+        help="Student isotonic map (isotonic_student_map.joblib). "
+        "If empty, tries output_dir/isotonic_student_map.joblib",
+    )
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default="data",
+        help="Directory containing EMBD-TRAIN-split_*.npy and rewards_split_*.json",
+    )
     parser.add_argument("--output_dir", type=str, default="distill_out")
     parser.add_argument("--server_alias", type=str, default="lq")
     args = parser.parse_args()
@@ -105,7 +117,9 @@ def main():
         print(f"Loading student isotonic model from {student_iso_path}")
         ir_student = joblib.load(student_iso_path)
     else:
-        print(f"No student isotonic model found at {student_iso_path} — skipping Student+Isotonic")
+        print(
+            f"No student isotonic model found at {student_iso_path} — skipping Student+Isotonic"
+        )
 
     # ------------------------------------------------------------------
     # 3. Evaluate all variants
@@ -122,9 +136,9 @@ def main():
 
     results = {}
     rows = [
-        ("Teacher ORM",        t_preds),
+        ("Teacher ORM", t_preds),
         ("Teacher + Isotonic", ti_preds),
-        ("Student",            s_preds),
+        ("Student", s_preds),
     ]
     if si_preds is not None:
         rows.append(("Student + Isotonic", si_preds))

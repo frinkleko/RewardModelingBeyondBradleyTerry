@@ -19,6 +19,7 @@ Usage:
 
   python convert_embeddings.py --task harmless --gen_model gemma2b
 """
+
 import os
 import argparse
 import glob
@@ -35,13 +36,15 @@ def find_embd_file(embd_dir, task, sft_obj, embed_model, gen_model):
     pattern_full = os.path.join(
         embd_dir,
         f"EMBD-TRAIN-embd_model_name_{embed_model}_dataset_orig_hh-rlhf-"
-        f"{task}{sft_suffix}_gen_pref_model_name_{gen_model}_golden_rm_name_{rm_name}.npy"
+        f"{task}{sft_suffix}_gen_pref_model_name_{gen_model}_golden_rm_name_{rm_name}.npy",
     )
     if os.path.exists(pattern_full):
         return pattern_full
 
     # Try glob fallback
-    candidates = glob.glob(os.path.join(embd_dir, f"EMBD-TRAIN*{task}*{gen_model}*.npy"))
+    candidates = glob.glob(
+        os.path.join(embd_dir, f"EMBD-TRAIN*{task}*{gen_model}*.npy")
+    )
     if candidates:
         return candidates[0]
     return None
@@ -56,7 +59,7 @@ def find_reward_file(embd_dir, task, sft_obj, embed_model, gen_model):
     pattern_full = os.path.join(
         embd_dir,
         f"REWARD-TRAIN-embd_model_name_{embed_model}_dataset_orig_hh-rlhf-"
-        f"{task}{sft_suffix}_gen_pref_model_name_{gen_model}_golden_rm_name_{rm_name}.npy"
+        f"{task}{sft_suffix}_gen_pref_model_name_{gen_model}_golden_rm_name_{rm_name}.npy",
     )
     if os.path.exists(pattern_full):
         return pattern_full
@@ -68,7 +71,9 @@ def find_reward_file(embd_dir, task, sft_obj, embed_model, gen_model):
         return short_path
 
     # Glob fallback
-    candidates = glob.glob(os.path.join(embd_dir, f"REWARD-TRAIN*{task}*{gen_model}*.npy"))
+    candidates = glob.glob(
+        os.path.join(embd_dir, f"REWARD-TRAIN*{task}*{gen_model}*.npy")
+    )
     if candidates:
         return candidates[0]
     return None
@@ -116,26 +121,58 @@ def convert(embd_file, reward_file, output_dir, max_prompts=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert embedding repo data to local format")
-    parser.add_argument("--embd_file", type=str, default=None,
-                        help="Path to EMBD .npy file (auto-detected if not provided)")
-    parser.add_argument("--reward_file", type=str, default=None,
-                        help="Path to REWARD .npy file (auto-detected if not provided)")
-    parser.add_argument("--embd_dir", type=str, default="embd/RM-Embeddings",
-                        help="Directory with downloaded embedding repo files")
-    parser.add_argument("--output_dir", type=str, default="data",
-                        help="Output directory for converted files")
-    parser.add_argument("--task", type=str, default="harmless",
-                        choices=["helpful", "harmless"],
-                        help="Task name for auto-detection")
-    parser.add_argument("--sft_obj", type=str, default="gpt4",
-                        help="SFT objective (gpt4 or none)")
-    parser.add_argument("--embed_model", type=str, default="gemma2b",
-                        help="Embedding model name")
-    parser.add_argument("--gen_model", type=str, default="gemma2b",
-                        help="Response generation model name")
-    parser.add_argument("--max_prompts", type=int, default=None,
-                        help="Limit number of prompts (for quick testing)")
+    parser = argparse.ArgumentParser(
+        description="Convert embedding repo data to local format"
+    )
+    parser.add_argument(
+        "--embd_file",
+        type=str,
+        default=None,
+        help="Path to EMBD .npy file (auto-detected if not provided)",
+    )
+    parser.add_argument(
+        "--reward_file",
+        type=str,
+        default=None,
+        help="Path to REWARD .npy file (auto-detected if not provided)",
+    )
+    parser.add_argument(
+        "--embd_dir",
+        type=str,
+        default="embd/RM-Embeddings",
+        help="Directory with downloaded embedding repo files",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="data",
+        help="Output directory for converted files",
+    )
+    parser.add_argument(
+        "--task",
+        type=str,
+        default="harmless",
+        choices=["helpful", "harmless"],
+        help="Task name for auto-detection",
+    )
+    parser.add_argument(
+        "--sft_obj", type=str, default="gpt4", help="SFT objective (gpt4 or none)"
+    )
+    parser.add_argument(
+        "--embed_model", type=str, default="gemma2b", help="Embedding model name"
+    )
+    parser.add_argument(
+        "--gen_model",
+        type=str,
+        default="gemma2b",
+        help="Response generation model name",
+    )
+    parser.add_argument(
+        "--max_prompts",
+        type=int,
+        default=None,
+        help="Limit number of prompts (for quick testing)",
+    )
     args = parser.parse_args()
 
     if args.embd_file is None:
@@ -143,8 +180,10 @@ def main():
             args.embd_dir, args.task, args.sft_obj, args.embed_model, args.gen_model
         )
         if args.embd_file is None:
-            print(f"ERROR: Could not find EMBD file for task={args.task}, "
-                  f"gen_model={args.gen_model} in {args.embd_dir}/")
+            print(
+                f"ERROR: Could not find EMBD file for task={args.task}, "
+                f"gen_model={args.gen_model} in {args.embd_dir}/"
+            )
             print("Available files:")
             for f in sorted(os.listdir(args.embd_dir)):
                 if f.startswith("EMBD"):
@@ -156,8 +195,10 @@ def main():
             args.embd_dir, args.task, args.sft_obj, args.embed_model, args.gen_model
         )
         if args.reward_file is None:
-            print(f"ERROR: Could not find REWARD file for task={args.task}, "
-                  f"gen_model={args.gen_model} in {args.embd_dir}/")
+            print(
+                f"ERROR: Could not find REWARD file for task={args.task}, "
+                f"gen_model={args.gen_model} in {args.embd_dir}/"
+            )
             print("Available files:")
             for f in sorted(os.listdir(args.embd_dir)):
                 if f.startswith("REWARD"):

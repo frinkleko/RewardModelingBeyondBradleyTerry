@@ -16,8 +16,12 @@ parser.add_argument("--embed_model_name", type=str, default="gemma2b")
 parser.add_argument("--task", type=str, default="helpful")
 parser.add_argument("--sft_obj", type=str, default="gpt4")
 parser.add_argument("--output_dir", type=str, default="distill_out")
-parser.add_argument("--data_dir", type=str, default="data",
-                    help="Directory containing EMBD-TRAIN-split_*.npy and rewards_split_*.json")
+parser.add_argument(
+    "--data_dir",
+    type=str,
+    default="data",
+    help="Directory containing EMBD-TRAIN-split_*.npy and rewards_split_*.json",
+)
 parser.add_argument("--server_alias", type=str, default="lq")
 parser.add_argument("--gen_pref_model_name", type=str, default="gemma7b")
 parser.add_argument("--ensemble_number", type=int, default=10)
@@ -27,9 +31,15 @@ parser.add_argument("--n_sample", type=int, default=100)
 parser.add_argument("--n_pairs", type=int, default=1)
 parser.add_argument("--training_epochs", type=int, default=30)
 parser.add_argument("--learning_rate", type=float, default=0.001)
-parser.add_argument("--normal_or_xprompt", type=str, default="xprompt", choices=["normal", "xprompt"])
-parser.add_argument("--replacement", type=str, default="replacement_false",
-                    choices=["replacement_true", "replacement_false"])
+parser.add_argument(
+    "--normal_or_xprompt", type=str, default="xprompt", choices=["normal", "xprompt"]
+)
+parser.add_argument(
+    "--replacement",
+    type=str,
+    default="replacement_false",
+    choices=["replacement_true", "replacement_false"],
+)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--max_len", type=int, default=-1)
 parser.add_argument("--annotation_quality", type=float, default=10)
@@ -45,13 +55,14 @@ os.makedirs(args.output_dir, exist_ok=True)
 # Data loading
 # ---------------------------------------------------------------------------
 
+
 def load_local_eval_data(data_dir):
     """Load embeddings and rewards from local .npy/.json files for evaluation."""
     emb_files = sorted(glob.glob(os.path.join(data_dir, "EMBD-TRAIN-split_*.npy")))
     rew_files = sorted(glob.glob(os.path.join(data_dir, "rewards_split_*.json")))
     if not emb_files or not rew_files:
         return None, None
-    
+
     # Use all available splits for evaluation
     all_embeddings = []
     all_rewards = []
@@ -64,22 +75,22 @@ def load_local_eval_data(data_dir):
                 data = json.loads(line)
                 rewards.append(data["reward"])
         all_rewards.append(rewards)
-    
+
     # Stack: shape [n_splits, n_prompts, emb_dim]
     # For evaluation, we treat each split as a different response per prompt
     n_splits = len(all_embeddings)
     n_prompts = all_embeddings[0].shape[0]
     emb_dim = all_embeddings[0].shape[1]
-    
+
     # Transpose to [n_prompts, n_splits, emb_dim] for per-prompt evaluation
     stacked_emb = np.stack(all_embeddings, axis=0)  # [n_splits, n_prompts, emb_dim]
     stacked_rew = np.array(all_rewards)  # [n_splits, n_prompts]
-    
+
     # reward_list[prompt_idx] = [reward_for_split_0, reward_for_split_1, ...]
     reward_list = []
     for p in range(n_prompts):
         reward_list.append([stacked_rew[s, p] for s in range(n_splits)])
-    
+
     return stacked_emb, reward_list
 
 
@@ -160,7 +171,10 @@ if n_splits >= 2:
     for p_idx in range(n_prompts):
         for s1 in range(n_splits):
             for s2 in range(s1 + 1, n_splits):
-                pred_diff = model_predictions_mean[p_idx][s1] - model_predictions_mean[p_idx][s2]
+                pred_diff = (
+                    model_predictions_mean[p_idx][s1]
+                    - model_predictions_mean[p_idx][s2]
+                )
                 true_diff = reward_list[p_idx][s1] - reward_list[p_idx][s2]
                 if (pred_diff > 0) == (true_diff > 0):
                     correct += 1

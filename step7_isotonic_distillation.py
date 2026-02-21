@@ -13,10 +13,10 @@ from networks import MLP, train_model, save_model
 from scipy.stats import spearmanr
 from tqdm import tqdm
 
-
 # ======================================================================
 # Helpers
 # ======================================================================
+
 
 def load_local_data(data_dir, max_samples=None):
     """Load EMBD-TRAIN-split_*.npy + rewards_split_*.json from data_dir."""
@@ -46,7 +46,9 @@ def predict_batch(model, embeddings, device, batch_size=512):
     model.eval()
     preds = []
     for i in range(0, len(embeddings), batch_size):
-        batch = torch.tensor(embeddings[i:i+batch_size], dtype=torch.float32).to(device)
+        batch = torch.tensor(embeddings[i : i + batch_size], dtype=torch.float32).to(
+            device
+        )
         with torch.no_grad():
             p = model(batch).cpu().numpy().flatten()
         preds.extend(p)
@@ -76,8 +78,18 @@ def cv_isotonic_fit(teacher_preds, golden_scores, n_folds=5, seed=42):
     return oof_calibrated, ir_full
 
 
-def train_student(model, X_train, y_train, X_val, y_val,
-                  epochs, lr, batch_size, device, label="Student"):
+def train_student(
+    model,
+    X_train,
+    y_train,
+    X_val,
+    y_val,
+    epochs,
+    lr,
+    batch_size,
+    device,
+    label="Student",
+):
     """Train a student MLP with MSE loss. Returns the trained model."""
     model = model.to(device)
     criterion = nn.MSELoss()
@@ -98,7 +110,7 @@ def train_student(model, X_train, y_train, X_val, y_val,
         perm = torch.randperm(X_tr.size(0))
         epoch_loss, n_b = 0.0, 0
         for i in range(0, X_tr.size(0), batch_size):
-            idx = perm[i:i+batch_size]
+            idx = perm[i : i + batch_size]
             optimizer.zero_grad()
             loss = criterion(model(X_tr[idx]), y_tr[idx])
             loss.backward()
@@ -110,8 +122,10 @@ def train_student(model, X_train, y_train, X_val, y_val,
         with torch.no_grad():
             val_loss = criterion(model(X_vl), y_vl).item()
 
-        print(f"  [{label}] Epoch {epoch+1}/{epochs}, "
-              f"Loss: {epoch_loss/max(n_b,1):.4f}, Val MSE: {val_loss:.4f}")
+        print(
+            f"  [{label}] Epoch {epoch+1}/{epochs}, "
+            f"Loss: {epoch_loss/max(n_b,1):.4f}, Val MSE: {val_loss:.4f}"
+        )
 
         if val_loss < best_val:
             best_val = val_loss
@@ -132,10 +146,11 @@ def train_student(model, X_train, y_train, X_val, y_val,
 # Main
 # ======================================================================
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Isotonic Distillation with cross-validated calibration "
-                    "and Student + Student-Isotonic variants."
+        "and Student + Student-Isotonic variants."
     )
     parser.add_argument("--embed_model_name", type=str, default="gemma2b")
     parser.add_argument("--task", type=str, default="helpful")
@@ -143,17 +158,27 @@ def main():
     parser.add_argument("--gen_pref_model_name", type=str, default="gemma2b")
     parser.add_argument("--rm_objective", type=str, choices=["clf", "bt"], default="bt")
     parser.add_argument(
-        "--teacher_ckpt", type=str, required=True,
+        "--teacher_ckpt",
+        type=str,
+        required=True,
         help="Path to the trained ORM checkpoint from step5",
     )
     parser.add_argument("--output_dir", type=str, default="distill_out")
-    parser.add_argument("--data_dir", type=str, default="data",
-                        help="Directory containing EMBD-TRAIN-split_*.npy and rewards_split_*.json")
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default="data",
+        help="Directory containing EMBD-TRAIN-split_*.npy and rewards_split_*.json",
+    )
     parser.add_argument("--n_samples_for_fit", type=int, default=10000)
     parser.add_argument("--distill_epochs", type=int, default=20)
     parser.add_argument("--learning_rate", type=float, default=0.001)
-    parser.add_argument("--cv_folds", type=int, default=5,
-                        help="Number of CV folds for isotonic fitting (0=no CV, fit on all)")
+    parser.add_argument(
+        "--cv_folds",
+        type=int,
+        default=5,
+        help="Number of CV folds for isotonic fitting (0=no CV, fit on all)",
+    )
     parser.add_argument("--server_alias", type=str, default="lq")
     args = parser.parse_args()
 
@@ -164,7 +189,9 @@ def main():
     # 1. Load embeddings and golden scores
     # ------------------------------------------------------------------
     print("Loading data...")
-    Embeds, Y_golden = load_local_data(args.data_dir, max_samples=args.n_samples_for_fit)
+    Embeds, Y_golden = load_local_data(
+        args.data_dir, max_samples=args.n_samples_for_fit
+    )
     if Embeds is None:
         print(f"ERROR: No data found in {args.data_dir}/")
         return
@@ -182,13 +209,15 @@ def main():
     n_cal = int(len(idx) * 0.6)
     n_str = int(len(idx) * 0.2)
     cal_idx = idx[:n_cal]
-    str_idx = idx[n_cal:n_cal+n_str]
-    val_idx = idx[n_cal+n_str:]
+    str_idx = idx[n_cal : n_cal + n_str]
+    val_idx = idx[n_cal + n_str :]
 
     E_cal, Y_cal = Embeds[cal_idx], Y_golden[cal_idx]
     E_str, Y_str = Embeds[str_idx], Y_golden[str_idx]
     E_val, Y_val = Embeds[val_idx], Y_golden[val_idx]
-    print(f"Data split: calibration={len(E_cal)}, student-train={len(E_str)}, held-out={len(E_val)}")
+    print(
+        f"Data split: calibration={len(E_cal)}, student-train={len(E_str)}, held-out={len(E_val)}"
+    )
 
     # ------------------------------------------------------------------
     # 3. Load Teacher ORM & collect predictions
@@ -213,7 +242,9 @@ def main():
     # 4. Fit Teacher Isotonic Regression (cross-validated to avoid overfit)
     # ------------------------------------------------------------------
     if args.cv_folds > 1:
-        print(f"\nFitting cross-validated isotonic regression ({args.cv_folds} folds)...")
+        print(
+            f"\nFitting cross-validated isotonic regression ({args.cv_folds} folds)..."
+        )
         oof_calibrated, ir_teacher = cv_isotonic_fit(
             T_cal, Y_cal, n_folds=args.cv_folds, seed=42
         )
@@ -226,8 +257,13 @@ def main():
     T_str_iso = ir_teacher.transform(T_str)
     T_val_iso = ir_teacher.transform(T_val)
 
-    np.save(os.path.join(args.output_dir, "predictions_teacher_isotonic.npy"), oof_calibrated)
-    joblib.dump(ir_teacher, os.path.join(args.output_dir, "isotonic_teacher_map.joblib"))
+    np.save(
+        os.path.join(args.output_dir, "predictions_teacher_isotonic.npy"),
+        oof_calibrated,
+    )
+    joblib.dump(
+        ir_teacher, os.path.join(args.output_dir, "isotonic_teacher_map.joblib")
+    )
     # Also save with legacy name for backward compatibility
     joblib.dump(ir_teacher, os.path.join(args.output_dir, "isotonic_map.joblib"))
 
@@ -245,12 +281,21 @@ def main():
 
     # Student trains on student-train set, validates on held-out
     student_model = train_student(
-        MLP(input_dim), E_str, T_str_iso, E_val, T_val_iso,
-        epochs=args.distill_epochs, lr=args.learning_rate,
-        batch_size=1024, device=device, label="Student"
+        MLP(input_dim),
+        E_str,
+        T_str_iso,
+        E_val,
+        T_val_iso,
+        epochs=args.distill_epochs,
+        lr=args.learning_rate,
+        batch_size=1024,
+        device=device,
+        label="Student",
     )
 
-    save_path = os.path.join(args.output_dir, f"distilled_rm_{args.task}_{args.rm_objective}.ckpt")
+    save_path = os.path.join(
+        args.output_dir, f"distilled_rm_{args.task}_{args.rm_objective}.ckpt"
+    )
     torch.save(student_model.state_dict(), save_path)
     print(f"  Student saved to {save_path}")
 
@@ -268,7 +313,9 @@ def main():
         ir_student = IsotonicRegression(out_of_bounds="clip")
         ir_student.fit(S_cal, Y_cal)
 
-    joblib.dump(ir_student, os.path.join(args.output_dir, "isotonic_student_map.joblib"))
+    joblib.dump(
+        ir_student, os.path.join(args.output_dir, "isotonic_student_map.joblib")
+    )
     print(f"  Student isotonic map saved.")
 
     # ------------------------------------------------------------------
@@ -281,10 +328,16 @@ def main():
     sp = lambda a, b: float(spearmanr(a, b).correlation)
 
     results_table = {
-        "Teacher ORM":         {"spearman": sp(T_val, Y_val),     "mse": mse(T_val, Y_val)},
-        "Teacher + Isotonic":  {"spearman": sp(T_val_iso, Y_val), "mse": mse(T_val_iso, Y_val)},
-        "Student":             {"spearman": sp(S_val, Y_val),     "mse": mse(S_val, Y_val)},
-        "Student + Isotonic":  {"spearman": sp(S_val_iso, Y_val), "mse": mse(S_val_iso, Y_val)},
+        "Teacher ORM": {"spearman": sp(T_val, Y_val), "mse": mse(T_val, Y_val)},
+        "Teacher + Isotonic": {
+            "spearman": sp(T_val_iso, Y_val),
+            "mse": mse(T_val_iso, Y_val),
+        },
+        "Student": {"spearman": sp(S_val, Y_val), "mse": mse(S_val, Y_val)},
+        "Student + Isotonic": {
+            "spearman": sp(S_val_iso, Y_val),
+            "mse": mse(S_val_iso, Y_val),
+        },
     }
 
     print(f"\n{'='*65}")
@@ -297,10 +350,14 @@ def main():
 
     n_show = min(5, len(E_val))
     print(f"\nScale Check (first {n_show} held-out samples):")
-    print(f"{'GoldenTruth':>12} {'Teacher':>12} {'T+Isotonic':>12} {'Student':>12} {'S+Isotonic':>12}")
+    print(
+        f"{'GoldenTruth':>12} {'Teacher':>12} {'T+Isotonic':>12} {'Student':>12} {'S+Isotonic':>12}"
+    )
     for i in range(n_show):
-        print(f"{Y_val[i]:>12.4f} {T_val[i]:>12.4f} {T_val_iso[i]:>12.4f} "
-              f"{S_val[i]:>12.4f} {S_val_iso[i]:>12.4f}")
+        print(
+            f"{Y_val[i]:>12.4f} {T_val[i]:>12.4f} {T_val_iso[i]:>12.4f} "
+            f"{S_val[i]:>12.4f} {S_val_iso[i]:>12.4f}"
+        )
 
     # ------------------------------------------------------------------
     # 8. Save everything

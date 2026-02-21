@@ -6,8 +6,12 @@ import argparse
 from datasets import Dataset, load_dataset, concatenate_datasets
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--output_dir", type=str, default="distill_out",
-                    help="Base output directory (same as steps 1-3)")
+parser.add_argument(
+    "--output_dir",
+    type=str,
+    default="distill_out",
+    help="Base output directory (same as steps 1-3)",
+)
 parser.add_argument("--model_name", type=str, default="gemma2b")
 parser.add_argument("--dataset", type=str, default="hh-rlhf-helpful-gpt4")
 parser.add_argument("--eval_dataset", type=str, default="hh-rlhf-helpful")
@@ -69,15 +73,11 @@ for data_cls in ["train", "test"]:
             gen_responses_trunc = np.array(gen_responses_trunc)
             gen_scores_sorted_idx = np.argsort(gen_scores)
             gen_scores_sorted = gen_scores[gen_scores_sorted_idx]
-            gen_responses_trunc_sorted = gen_responses_trunc[
-                gen_scores_sorted_idx
-            ]
+            gen_responses_trunc_sorted = gen_responses_trunc[gen_scores_sorted_idx]
 
             for i in range(n_samples):
                 json_out_line[i]["scores_sorted"] = gen_scores_sorted[i]
-                json_out_line[i]["responses_sorted"] = (
-                    gen_responses_trunc_sorted[i]
-                )
+                json_out_line[i]["responses_sorted"] = gen_responses_trunc_sorted[i]
 
                 out_file = os.path.join(
                     temp_out,
