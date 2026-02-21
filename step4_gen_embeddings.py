@@ -31,7 +31,7 @@ args = parser.parse_args()
 
 
 if args.embed_model_name == "gemma2b":
-    model_name_or_path = ("google/gemma-2b",)
+    model_name_or_path = "google/gemma-2b"
 elif args.embed_model_name == "gemma7b":
     model_name_or_path = "google/gemma-7b"
 elif args.embed_model_name == "llama38b":

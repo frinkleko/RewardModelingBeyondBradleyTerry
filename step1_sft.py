@@ -1,10 +1,10 @@
 import os
 import argparse
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset, Dataset, load_from_disk
-from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
-from peft import LoraConfig, AutoPeftModelForCausalLM, get_peft_model, PeftModel
+from trl import SFTTrainer, SFTConfig
+from peft import LoraConfig, get_peft_model
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model_name", type=str, default="gemma2b")
@@ -78,36 +78,25 @@ peft_model = get_peft_model(base_model, lora_config).to(f"cuda:0")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
 tokenizer.pad_token = tokenizer.eos_token
 
-training_args = TrainingArguments(
+# Rename 'chosen' -> 'completion' so SFTTrainer recognises prompt/completion columns
+dataset = dataset.rename_column("chosen", "completion")
+
+training_args = SFTConfig(
     num_train_epochs=args.epochs,
     output_dir=f"{args.output_dir}/ckpts_SFT/" + OUT_PATH,
     learning_rate=args.learning_rate,
     save_strategy="steps",
     save_steps=args.save_steps,
-    per_device_train_batch_size=1,
+    per_device_train_batch_size=4,
     logging_steps=10,
-)
-
-
-def formatting_prompts_func(example):
-    output_texts = []
-    for i in range(len(example["prompt"])):
-        text = f"{example['prompt'][i]} {example['chosen'][i]}"
-        output_texts.append(text)
-    return output_texts
-
-
-response_template = "Assistant:"  # The token that indicates the start of a response, tokens may be different depending on the model
-collator = DataCollatorForCompletionOnlyLM(
-    response_template=response_template, tokenizer=tokenizer
+    max_length=512,
+    completion_only_loss=True,  # trl >= 0.28: built-in completion-only masking
 )
 
 trainer = SFTTrainer(
-    peft_model,
+    model=peft_model,
     train_dataset=dataset,
     args=training_args,
-    formatting_func=formatting_prompts_func,
-    data_collator=collator,
 )
 
 trainer.train()

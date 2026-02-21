@@ -9,3 +9,5 @@ macro_out*
 *.log
 .DS_Store
 data/
+embd/
+data_harmless

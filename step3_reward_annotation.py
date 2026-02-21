@@ -65,7 +65,6 @@ rank_model = AutoModelForSequenceClassification.from_pretrained(
     rm_path,
     num_labels=1,
     output_attentions=False,
-    return_dict_in_generate=True,
     attn_implementation="eager",
 ).to(f"cuda:{args.gpu_idx}")
 
